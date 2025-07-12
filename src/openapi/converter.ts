@@ -1,11 +1,21 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import freeeApiSchema from '../data/freee-api-schema.json';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { OpenAPIOperation, OpenAPIPathItem, OpenAPIParameter } from '../api/types.js';
 import { convertParameterToZodSchema, convertPathToToolName } from './schema.js';
 import { makeApiRequest } from '../api/client.js';
 
+function loadApiSchema() {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const schemaPath = join(__dirname, '../data/freee-api-schema.json');
+  return JSON.parse(readFileSync(schemaPath, 'utf8'));
+}
+
 export function generateToolsFromOpenApi(server: McpServer): void {
+  const freeeApiSchema = loadApiSchema();
   const paths = freeeApiSchema.paths;
 
   const orderedPathKeys = Object.keys(paths).sort() as (keyof typeof paths)[];
@@ -13,7 +23,7 @@ export function generateToolsFromOpenApi(server: McpServer): void {
   orderedPathKeys.forEach((pathKey) => {
     const pathItem: OpenAPIPathItem = paths[pathKey];
     Object.entries(pathItem).forEach(([method, operation]: [string, OpenAPIOperation]) => {
-      const toolName = `${method}_${convertPathToToolName(pathKey)}`;
+      const toolName = `${method}_${convertPathToToolName(pathKey as string)}`;
       const description = operation.summary || operation.description || '';
 
       const parameterSchema: Record<string, z.ZodType> = {};

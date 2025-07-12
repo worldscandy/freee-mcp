@@ -2,60 +2,72 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { generateToolsFromOpenApi } from './converter.js';
 
-vi.mock('../data/freee-api-schema.json', () => ({
-  default: {
-    paths: {
-      '/api/1/users/me': {
-        get: {
-          summary: 'Get current user',
-          parameters: [
-            {
-              name: 'company_id',
-              in: 'query',
-              schema: { type: 'integer' }
-            }
-          ]
-        }
+const mockApiSchema = {
+  paths: {
+    '/api/1/users/me': {
+      get: {
+        summary: 'Get current user',
+        parameters: [
+          {
+            name: 'company_id',
+            in: 'query',
+            schema: { type: 'integer' }
+          }
+        ]
+      }
+    },
+    '/api/1/deals/{id}': {
+      get: {
+        summary: 'Get deal by ID',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' }
+          },
+          {
+            name: 'company_id',
+            in: 'query',
+            schema: { type: 'integer' }
+          }
+        ]
       },
-      '/api/1/deals/{id}': {
-        get: {
-          summary: 'Get deal by ID',
-          parameters: [
-            {
-              name: 'id',
-              in: 'path',
-              required: true,
-              schema: { type: 'integer' }
-            },
-            {
-              name: 'company_id',
-              in: 'query',
-              schema: { type: 'integer' }
-            }
-          ]
-        },
-        put: {
-          summary: 'Update deal',
-          parameters: [
-            {
-              name: 'id',
-              in: 'path',
-              required: true,
-              schema: { type: 'integer' }
-            }
-          ],
-          requestBody: {
-            content: {
-              'application/json': {
-                schema: { type: 'object' }
-              }
+      put: {
+        summary: 'Update deal',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' }
+          }
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: { type: 'object' }
             }
           }
         }
       }
     }
   }
+};
+
+vi.mock('fs', () => ({
+  readFileSync: vi.fn(() => JSON.stringify(mockApiSchema))
 }));
+
+vi.mock('url', () => ({
+  fileURLToPath: vi.fn(() => '/mock/path/file.js')
+}));
+
+vi.mock('path', () => ({
+  dirname: vi.fn(() => '/mock/path'),
+  join: vi.fn(() => '/mock/path/data/freee-api-schema.json')
+}));
+
 
 vi.mock('./schema.js', () => ({
   convertParameterToZodSchema: vi.fn((param): { optional: () => { _def: { typeName: string } }; _def: { typeName: string } } => ({
