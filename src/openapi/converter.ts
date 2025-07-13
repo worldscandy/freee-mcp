@@ -1,5 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
 import freeeApiSchema from '../data/freee-api-schema.json';
 import { OpenAPIOperation, OpenAPIPathItem, OpenAPIParameter } from '../api/types.js';
 import { convertParameterToZodSchema, convertPathToToolName, sanitizePropertyName } from './schema.js';
@@ -35,6 +37,12 @@ export function generateToolsFromOpenApi(server: McpServer): void {
         parameterSchema[sanitizedName] = schema;
         parameterNameMap[sanitizedName] = param.name;
       });
+
+      // Add file_path parameter for download endpoints
+      const isDownloadEndpoint = pathKey.includes('/download');
+      if (isDownloadEndpoint) {
+        parameterSchema['file_path'] = z.string().describe('保存先ファイルパス（例: /tmp/receipt.pdf）');
+      }
 
       let bodySchema = z.any();
       if (method === 'post' || method === 'put') {
@@ -73,6 +81,39 @@ export function generateToolsFromOpenApi(server: McpServer): void {
 
           // Handle binary responses (ArrayBuffer)
           if (result instanceof ArrayBuffer) {
+            // For download endpoints, save file if file_path is provided
+            if (isDownloadEndpoint && params.file_path) {
+              try {
+                // Ensure directory exists
+                const dir = path.dirname(params.file_path as string);
+                if (!fs.existsSync(dir)) {
+                  fs.mkdirSync(dir, { recursive: true });
+                }
+                
+                // Save binary data to file
+                fs.writeFileSync(params.file_path as string, Buffer.from(result));
+                
+                return {
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Binary file downloaded successfully.\nSaved to: ${params.file_path}\nSize: ${result.byteLength} bytes`,
+                    },
+                  ],
+                };
+              } catch (fileError) {
+                return {
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Error saving file: ${fileError instanceof Error ? fileError.message : String(fileError)}\nBinary data size: ${result.byteLength} bytes`,
+                    },
+                  ],
+                };
+              }
+            }
+            
+            // Fallback: return Base64 (may hit token limits for large files)
             const base64Data = Buffer.from(result).toString('base64');
             return {
               content: [
