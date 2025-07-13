@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import { dependencies } from './package.json';
-import { chmod } from 'fs/promises';
+import { chmod, mkdir, copyFile } from 'fs/promises';
 
 const entryFile = 'src/index.ts';
 const shared = {
@@ -38,3 +38,9 @@ await build({
   },
 });
 await chmod(binFile, 0o755);
+
+// Copy data files to dist directory
+console.log('Copying data files...');
+await mkdir('./dist/data', { recursive: true });
+await copyFile('./src/data/freee-api-schema.json', './dist/data/freee-api-schema.json');
+console.log('✅ Data files copied successfully');

@@ -55,17 +55,30 @@ const mockApiSchema = {
   }
 };
 
+// Mock global fetch for dynamic schema loading tests
+global.fetch = vi.fn();
+
 vi.mock('fs', () => ({
-  readFileSync: vi.fn(() => JSON.stringify(mockApiSchema))
+  readFileSync: vi.fn(() => JSON.stringify(mockApiSchema)),
+  default: {
+    readFileSync: vi.fn(() => JSON.stringify(mockApiSchema))
+  }
 }));
 
 vi.mock('url', () => ({
-  fileURLToPath: vi.fn(() => '/mock/path/file.js')
+  fileURLToPath: vi.fn(() => '/mock/path/file.js'),
+  default: {
+    fileURLToPath: vi.fn(() => '/mock/path/file.js')
+  }
 }));
 
 vi.mock('path', () => ({
   dirname: vi.fn(() => '/mock/path'),
-  join: vi.fn(() => '/mock/path/data/freee-api-schema.json')
+  join: vi.fn(() => '/mock/path/../data/freee-api-schema.json'),
+  default: {
+    dirname: vi.fn(() => '/mock/path'),
+    join: vi.fn(() => '/mock/path/../data/freee-api-schema.json')
+  }
 }));
 
 
@@ -94,8 +107,11 @@ describe('converter', () => {
   });
 
   describe('generateToolsFromOpenApi', () => {
-    it('should generate tools from OpenAPI schema', () => {
-      generateToolsFromOpenApi(mockServer);
+    it('should generate tools from OpenAPI schema', async () => {
+      // Mock fetch to fail so it falls back to local schema
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network error'));
+      
+      await generateToolsFromOpenApi(mockServer);
 
       expect(mockTool).toHaveBeenCalledTimes(3);
       
@@ -124,8 +140,11 @@ describe('converter', () => {
     it('should handle tool execution successfully', async () => {
       const mockMakeApiRequest = await import('../api/client.js');
       vi.mocked(mockMakeApiRequest.makeApiRequest).mockResolvedValue({ success: true });
+      
+      // Mock fetch to fail so it falls back to local schema
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network error'));
 
-      generateToolsFromOpenApi(mockServer);
+      await generateToolsFromOpenApi(mockServer);
 
       const getUserMeHandler = mockTool.mock.calls.find(call => call[0] === 'get_api_1_users_me')?.[3];
       expect(getUserMeHandler).toBeDefined();
@@ -152,8 +171,11 @@ describe('converter', () => {
     it('should handle path parameters correctly', async () => {
       const mockMakeApiRequest = await import('../api/client.js');
       vi.mocked(mockMakeApiRequest.makeApiRequest).mockResolvedValue({ deal: { id: 123 } });
+      
+      // Mock fetch to fail so it falls back to local schema
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network error'));
 
-      generateToolsFromOpenApi(mockServer);
+      await generateToolsFromOpenApi(mockServer);
 
       const getDealHandler = mockTool.mock.calls.find(call => call[0] === 'get_api_1_deals_id')?.[3];
       expect(getDealHandler).toBeDefined();
@@ -171,8 +193,11 @@ describe('converter', () => {
     it('should handle request body for POST/PUT requests', async () => {
       const mockMakeApiRequest = await import('../api/client.js');
       vi.mocked(mockMakeApiRequest.makeApiRequest).mockResolvedValue({ updated: true });
+      
+      // Mock fetch to fail so it falls back to local schema
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network error'));
 
-      generateToolsFromOpenApi(mockServer);
+      await generateToolsFromOpenApi(mockServer);
 
       const putDealHandler = mockTool.mock.calls.find(call => call[0] === 'put_api_1_deals_id')?.[3];
       expect(putDealHandler).toBeDefined();
@@ -191,8 +216,11 @@ describe('converter', () => {
     it('should handle errors gracefully', async () => {
       const mockMakeApiRequest = await import('../api/client.js');
       vi.mocked(mockMakeApiRequest.makeApiRequest).mockRejectedValue(new Error('API Error'));
+      
+      // Mock fetch to fail so it falls back to local schema
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network error'));
 
-      generateToolsFromOpenApi(mockServer);
+      await generateToolsFromOpenApi(mockServer);
 
       const getUserMeHandler = mockTool.mock.calls.find(call => call[0] === 'get_api_1_users_me')?.[3];
       expect(getUserMeHandler).toBeDefined();
@@ -212,8 +240,11 @@ describe('converter', () => {
     it('should skip undefined query parameters', async () => {
       const mockMakeApiRequest = await import('../api/client.js');
       vi.mocked(mockMakeApiRequest.makeApiRequest).mockResolvedValue({ success: true });
+      
+      // Mock fetch to fail so it falls back to local schema
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network error'));
 
-      generateToolsFromOpenApi(mockServer);
+      await generateToolsFromOpenApi(mockServer);
 
       const getDealHandler = mockTool.mock.calls.find(call => call[0] === 'get_api_1_deals_id')?.[3];
       expect(getDealHandler).toBeDefined();
@@ -226,6 +257,39 @@ describe('converter', () => {
         {},
         undefined
       );
+    });
+
+    it('should fetch schema from remote URL successfully', async () => {
+      // Mock successful fetch
+      const mockResponse = {
+        ok: true,
+        json: vi.fn().mockResolvedValue(mockApiSchema)
+      };
+      vi.mocked(global.fetch).mockResolvedValue(mockResponse as any);
+      
+      await generateToolsFromOpenApi(mockServer);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://raw.githubusercontent.com/freee/freee-api-schema/master/v2020_06_15/open-api-3/api-schema.json',
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+          headers: {
+            'User-Agent': 'freee-mcp-server/1.0.0'
+          }
+        })
+      );
+
+      expect(mockTool).toHaveBeenCalledTimes(3);
+    });
+
+    it('should fallback to local schema when remote fetch fails', async () => {
+      // Mock fetch failure
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network error'));
+      
+      await generateToolsFromOpenApi(mockServer);
+
+      expect(global.fetch).toHaveBeenCalled();
+      expect(mockTool).toHaveBeenCalledTimes(3);
     });
   });
 });

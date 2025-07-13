@@ -7,15 +7,67 @@ import { OpenAPIOperation, OpenAPIPathItem, OpenAPIParameter } from '../api/type
 import { convertParameterToZodSchema, convertPathToToolName } from './schema.js';
 import { makeApiRequest } from '../api/client.js';
 
-function loadApiSchema() {
+async function loadApiSchema() {
+  const FREEE_SCHEMA_URL = 'https://raw.githubusercontent.com/freee/freee-api-schema/master/v2020_06_15/open-api-3/api-schema.json';
+  
+  // 1st: Try to fetch schema from freee API repository
+  try {
+    console.log('🌐 Fetching schema from freee API repository...');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    const response = await fetch(FREEE_SCHEMA_URL, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'freee-mcp-server/1.0.0'
+      }
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const schema = await response.json();
+    console.log('✅ Schema fetched successfully from freee API repository');
+    return schema;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn('⚠️  Failed to fetch schema from freee API repository:', errorMessage);
+  }
+  
+  // 2nd: Fallback to local schema file
+  console.log('📁 Falling back to local schema file...');
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const schemaPath = join(__dirname, '../data/freee-api-schema.json');
-  return JSON.parse(readFileSync(schemaPath, 'utf8'));
+  
+  // Try multiple possible paths for the schema file
+  const possiblePaths = [
+    join(__dirname, '../data/freee-api-schema.json'),        // Production: dist/data/
+    join(__dirname, '../../data/freee-api-schema.json'),     // Development: src/data/
+    join(__dirname, '../src/data/freee-api-schema.json'),    // Alternative dev path
+    join(process.cwd(), 'dist/data/freee-api-schema.json'),  // Absolute from project root
+    join(process.cwd(), 'src/data/freee-api-schema.json'),   // Absolute from project root (dev)
+  ];
+  
+  for (const schemaPath of possiblePaths) {
+    try {
+      const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
+      console.log('✅ Local schema loaded successfully from:', schemaPath);
+      return schema;
+    } catch (error) {
+      // Continue to next path
+      continue;
+    }
+  }
+  
+  // 3rd: Error if both remote and local loading failed
+  throw new Error(`Both remote and local schema loading failed. Remote URL: ${FREEE_SCHEMA_URL}, Local paths: ${possiblePaths.join(', ')}`);
 }
 
-export function generateToolsFromOpenApi(server: McpServer): void {
-  const freeeApiSchema = loadApiSchema();
+export async function generateToolsFromOpenApi(server: McpServer): Promise<void> {
+  const freeeApiSchema = await loadApiSchema();
   const paths = freeeApiSchema.paths;
 
   const orderedPathKeys = Object.keys(paths).sort() as (keyof typeof paths)[];

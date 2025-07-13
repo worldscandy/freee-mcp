@@ -12,7 +12,7 @@ export async function createAndStartServer(): Promise<void> {
   });
 
   addAuthenticationTools(server);
-  generateToolsFromOpenApi(server);
+  await generateToolsFromOpenApi(server);
 
   try {
     await startCallbackServer();
