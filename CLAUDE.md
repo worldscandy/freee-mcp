@@ -21,7 +21,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm format` - Format code with Prettier
 
 ### Testing & Development Tools
-- `node scripts/test-tools.js` - Quick tool information and availability check
+- `node scripts/test-mcp-simple.js --help` - 使いやすいテストツール (推奨)
+- `node scripts/test-mcp-simple.js <tool> [params...]` - 一回だけの実行
 - `node scripts/test-mcp.js` - Full MCP protocol testing with interactive mode
 - `pnpm inspector` - GUI-based MCP tool testing (opens browser interface)
 

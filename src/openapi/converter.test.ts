@@ -215,5 +215,21 @@ describe('converter', () => {
         undefined
       );
     });
+
+    it('should handle binary responses (ArrayBuffer) correctly', async () => {
+      const mockMakeApiRequest = await import('../api/client.js');
+      const mockArrayBuffer = new ArrayBuffer(1024);
+      vi.mocked(mockMakeApiRequest.makeApiRequest).mockResolvedValue(mockArrayBuffer);
+
+      generateToolsFromOpenApi(mockServer);
+
+      const getUserMeHandler = mockTool.mock.calls.find(call => call[0] === 'get_api_1_users_me')?.[3];
+      expect(getUserMeHandler).toBeDefined();
+
+      const result = await getUserMeHandler({ company_id: 12345 });
+
+      expect(result.content[0].text).toContain('Binary data downloaded successfully (1024 bytes)');
+      expect(result.content[0].text).toContain('Base64: data:application/octet-stream;base64,');
+    });
   });
 });

@@ -42,6 +42,9 @@ describe('client', () => {
       const mockResponse = { data: 'test-data' };
       mockFetch.mockResolvedValue({
         ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
         json: () => Promise.resolve(mockResponse)
       });
 
@@ -67,6 +70,9 @@ describe('client', () => {
       
       mockFetch.mockResolvedValue({
         ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
         json: () => Promise.resolve({})
       });
 
@@ -84,6 +90,9 @@ describe('client', () => {
       
       mockFetch.mockResolvedValue({
         ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
         json: () => Promise.resolve({})
       });
 
@@ -101,6 +110,9 @@ describe('client', () => {
       
       mockFetch.mockResolvedValue({
         ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
         json: () => Promise.resolve({})
       });
 
@@ -187,6 +199,96 @@ describe('client', () => {
       await expect(makeApiRequest('GET', '/api/1/users/me')).rejects.toThrow(
         'API request failed: 500\n\n詳細: {}'
       );
+    });
+
+    it('should handle binary responses for download endpoints', async () => {
+      const mockGetValidAccessToken = await import('../auth/tokens.js');
+      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
+      
+      const mockArrayBuffer = new ArrayBuffer(8);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/pdf' : null
+        },
+        arrayBuffer: () => Promise.resolve(mockArrayBuffer)
+      });
+
+      const result = await makeApiRequest('GET', '/api/1/receipts/123/download');
+
+      expect(result).toBe(mockArrayBuffer);
+    });
+
+    it('should handle binary responses for image content types', async () => {
+      const mockGetValidAccessToken = await import('../auth/tokens.js');
+      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
+      
+      const mockArrayBuffer = new ArrayBuffer(8);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'image/png' : null
+        },
+        arrayBuffer: () => Promise.resolve(mockArrayBuffer)
+      });
+
+      const result = await makeApiRequest('GET', '/api/1/receipts/123/download');
+
+      expect(result).toBe(mockArrayBuffer);
+    });
+
+    it('should handle binary responses for paths containing download', async () => {
+      const mockGetValidAccessToken = await import('../auth/tokens.js');
+      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
+      
+      const mockArrayBuffer = new ArrayBuffer(8);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'text/plain' : null
+        },
+        arrayBuffer: () => Promise.resolve(mockArrayBuffer)
+      });
+
+      const result = await makeApiRequest('GET', '/api/1/journals/reports/123/download');
+
+      expect(result).toBe(mockArrayBuffer);
+    });
+
+    it('should handle JSON responses for non-binary content types', async () => {
+      const mockGetValidAccessToken = await import('../auth/tokens.js');
+      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
+      
+      const mockResponse = { data: 'test-data' };
+      mockFetch.mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        json: () => Promise.resolve(mockResponse)
+      });
+
+      const result = await makeApiRequest('GET', '/api/1/users/me');
+
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should handle text responses for unknown content types', async () => {
+      const mockGetValidAccessToken = await import('../auth/tokens.js');
+      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
+      
+      const mockText = 'plain text response';
+      mockFetch.mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'text/plain' : null
+        },
+        text: () => Promise.resolve(mockText)
+      });
+
+      const result = await makeApiRequest('GET', '/api/1/unknown/endpoint');
+
+      expect(result).toBe(mockText);
     });
   });
 });

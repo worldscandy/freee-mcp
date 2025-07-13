@@ -90,5 +90,18 @@ export async function makeApiRequest(
     throw new Error(errorMessage);
   }
 
-  return response.json();
+  const contentType = response.headers.get('content-type');
+  
+  if (contentType?.includes('application/json')) {
+    return response.json();
+  }
+  
+  if (contentType?.includes('application/pdf') || 
+      contentType?.includes('image/') || 
+      contentType?.includes('application/octet-stream') ||
+      path.includes('/download')) {
+    return response.arrayBuffer();
+  }
+  
+  return response.text();
 }

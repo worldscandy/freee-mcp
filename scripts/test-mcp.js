@@ -30,9 +30,34 @@ async function testMcpTools() {
     cwd: process.cwd()
   });
 
-  // 標準出力の監視
+  // 標準出力の監視 - 大きなJSONレスポンス対応
+  let accumulatedData = '';
+  const responses = [];
+  
   mcpProcess.stdout.on('data', (data) => {
-    console.log(`📥 受信: ${data.toString().trim()}`);
+    accumulatedData += data.toString();
+    const lines = accumulatedData.split('\n');
+    
+    // 最後の不完全な行は次回まで保持
+    accumulatedData = lines.pop() || '';
+    
+    lines.forEach((line) => {
+      if (line.trim()) {
+        try {
+          const response = JSON.parse(line);
+          console.log('📥 Response received:', JSON.stringify(response, null, 2));
+          responses.push(response);
+        } catch (error) {
+          // JSONが大きすぎて分割されている場合の処理
+          if (line.includes('"tools":[') && !line.includes(']}}')) {
+            console.log('📥 Large tools response detected, accumulating...');
+            accumulatedData = line + accumulatedData;
+          } else {
+            console.log('⚠️ Non-JSON data:', line.substring(0, 200) + (line.length > 200 ? '...' : ''));
+          }
+        }
+      }
+    });
   });
 
   // 標準エラー出力の監視（ログ用）
@@ -138,7 +163,16 @@ async function testMcpTools() {
 
   // インタラクティブモード
   console.log('\n=== インタラクティブモード ===');
-  console.log('ツール名を入力してテストしてください（例: freee_current_user）');
+  console.log('ツール名を入力してテストしてください');
+  console.log('');
+  console.log('📋 使用例:');
+  console.log('  freee_current_user');
+  console.log('  get_receipts start_date=2024-01-01 end_date=2024-12-31 limit=3');
+  console.log('  get_api_1_receipts_123_download');
+  console.log('');
+  console.log('💡 JSON形式も可能:');
+  console.log('  get_receipts {"start_date":"2024-01-01","end_date":"2024-12-31","limit":3}');
+  console.log('');
   console.log('終了するには "exit" と入力してください\n');
 
   const rl = createInterface({
@@ -146,26 +180,77 @@ async function testMcpTools() {
     output: process.stdout
   });
 
+  const parseToolInput = (input) => {
+    const trimmed = input.trim();
+    
+    // JSON形式の場合
+    const jsonMatch = trimmed.match(/^(\S+)\s+(\{.+\})$/);
+    if (jsonMatch) {
+      try {
+        const toolName = jsonMatch[1];
+        const args = JSON.parse(jsonMatch[2]);
+        return { toolName, arguments: args };
+      } catch (e) {
+        console.log('❌ JSON解析エラー:', e.message);
+        return null;
+      }
+    }
+    
+    // key=value形式の場合
+    const parts = trimmed.split(/\s+/);
+    const toolName = parts[0];
+    const args = {};
+    
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      const eqIndex = part.indexOf('=');
+      if (eqIndex > 0) {
+        const key = part.substring(0, eqIndex);
+        let value = part.substring(eqIndex + 1);
+        
+        // 数値かどうか判定
+        if (/^\d+$/.test(value)) {
+          value = parseInt(value);
+        } else if (/^\d+\.\d+$/.test(value)) {
+          value = parseFloat(value);
+        }
+        
+        args[key] = value;
+      }
+    }
+    
+    return { toolName, arguments: args };
+  };
+
   const askForTool = () => {
-    rl.question('ツール名を入力 > ', (toolName) => {
-      if (toolName.toLowerCase() === 'exit') {
+    rl.question('ツール名を入力 > ', (input) => {
+      if (input.toLowerCase().trim() === 'exit') {
         console.log('\n👋 テスト終了');
         mcpProcess.kill();
         rl.close();
         process.exit(0);
       }
 
-      if (toolName.trim()) {
-        console.log(`\n=== ${toolName} ツールテスト ===`);
-        sendMcpMessage(mcpProcess, {
-          jsonrpc: '2.0',
-          id: getNextRequestId(),
-          method: 'tools/call',
-          params: {
-            name: toolName,
-            arguments: {}
+      if (input.trim()) {
+        const parsed = parseToolInput(input);
+        if (parsed) {
+          const { toolName, arguments: args } = parsed;
+          console.log(`\n=== ${toolName} ツールテスト ===`);
+          
+          if (Object.keys(args).length > 0) {
+            console.log(`📋 パラメータ: ${JSON.stringify(args)}`);
           }
-        });
+          
+          sendMcpMessage(mcpProcess, {
+            jsonrpc: '2.0',
+            id: getNextRequestId(),
+            method: 'tools/call',
+            params: {
+              name: toolName,
+              arguments: args
+            }
+          });
+        }
         
         setTimeout(() => {
           askForTool();

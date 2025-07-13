@@ -50,7 +50,19 @@ async function testFreeeTools() {
     'delete_deals_by_id'
   ];
   
+  console.log('\n📥 バイナリダウンロードツール:');
+  const downloadTools = [
+    'download_receipt',
+    'download_journal',
+    'get_receipts',
+    'get_journals_reports'
+  ];
+  
   sampleApiTools.forEach(tool => {
+    console.log(`  • ${tool}`);
+  });
+  
+  downloadTools.forEach(tool => {
     console.log(`  • ${tool}`);
   });
 
@@ -73,8 +85,14 @@ async function testFreeeTools() {
   console.log('2. 本格的なMCPクライアントテスト:');
   console.log('   node scripts/test-mcp.js');
   console.log('   → MCP プロトコル経由でツールを実行');
+  console.log('   → ~/.config/freee-mcp/ の認証トークンを使用');
   console.log('');
-  console.log('3. Claude Code での使用:');
+  console.log('3. バイナリダウンロードテスト例:');
+  console.log('   # インタラクティブモードで以下を実行:');
+  console.log('   get_receipts  # まずレシート一覧を取得');
+  console.log('   download_receipt  # レシートIDを指定してダウンロード');
+  console.log('');
+  console.log('4. Claude Code での使用:');
   console.log('   Claude Code の設定にMCPサーバーを追加して使用');
   console.log('');
   console.log('=== 設定例 (Claude Code) ===');
