@@ -1,0 +1,1183 @@
+From 10e10af5661027a297ebe6d5e4e05c6414cb71a9 Mon Sep 17 00:00:00 2001
+From: Yuji Kamada <yuji.kamada@eijuworks.com>
+Date: Sun, 13 Jul 2025 19:10:05 +0900
+Subject: [PATCH 3/4] Fix Issue #4: Binary response endpoints and MCP schema
+ validation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Fix makeApiRequest() to handle binary responses based on Content-Type
+- Add ArrayBuffer to Base64 conversion in OpenAPI converter
+- Add parameter name sanitization for MCP schema validation
+- Add comprehensive tests for binary response handling
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ CLAUDE.md                     |   3 +-
+ scripts/claude.md             | 222 ++++++++++++++++++
+ scripts/test-mcp-simple.js    | 426 ++++++++++++++++++++++++++++++++++
+ scripts/test-mcp.js           | 115 +++++++--
+ scripts/test-tools.js         |  20 +-
+ src/api/client.test.ts        | 102 ++++++++
+ src/api/client.ts             |  15 +-
+ src/openapi/converter.test.ts |  16 ++
+ src/openapi/converter.ts      |  39 +++-
+ 9 files changed, 934 insertions(+), 24 deletions(-)
+ create mode 100644 scripts/claude.md
+ create mode 100755 scripts/test-mcp-simple.js
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 4761842..dd68e62 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -21,7 +21,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
+ - `pnpm format` - Format code with Prettier
+ 
+ ### Testing & Development Tools
+-- `node scripts/test-tools.js` - Quick tool information and availability check
++- `node scripts/test-mcp-simple.js --help` - 使いやすいテストツール (推奨)
++- `node scripts/test-mcp-simple.js <tool> [params...]` - 一回だけの実行
+ - `node scripts/test-mcp.js` - Full MCP protocol testing with interactive mode
+ - `pnpm inspector` - GUI-based MCP tool testing (opens browser interface)
+ 
+diff --git a/scripts/claude.md b/scripts/claude.md
+new file mode 100644
+index 0000000..32b0b01
+--- /dev/null
++++ b/scripts/claude.md
+@@ -0,0 +1,222 @@
++# MCP テストスクリプト使い方ガイド
++
++## 概要
++
++freee MCP サーバーの動作確認用スクリプトです。2つのバージョンを提供しています：
++
++1. **test-mcp-simple.js** (推奨): Claude Code 向け最適化版
++2. **test-mcp.js** (従来版): 完全な動作確認版
++
++## test-mcp-simple.js (推奨)
++
++Claude Code での使用に最適化された軽量・高速版です。
++
++### ヘルプ表示
++
++```bash
++# 詳細な使用例を表示
++node scripts/test-mcp-simple.js --help
++node scripts/test-mcp-simple.js -h
++
++# バージョン情報
++node scripts/test-mcp-simple.js --version
++```
++
++### 実行方法
++
++#### コマンドライン実行（一回だけ）- 推奨
++```bash
++# 基本ツール
++node scripts/test-mcp-simple.js freee_current_user
++node scripts/test-mcp-simple.js freee_auth_status
++node scripts/test-mcp-simple.js freee_list_companies
++
++# データ取得
++node scripts/test-mcp-simple.js get_deals limit=5
++node scripts/test-mcp-simple.js get_receipts start_date=2025-01-01 end_date=2025-12-31 limit=3
++node scripts/test-mcp-simple.js get_companies
++
++# バイナリダウンロード
++node scripts/test-mcp-simple.js get_receipts_by_id_download id=123456789
++node scripts/test-mcp-simple.js get_journals_reports_by_id_download id=987654321
++
++# 仕訳帳生成 → ダウンロード
++node scripts/test-mcp-simple.js get_journals download_type=pdf start_date=2025-01-01 end_date=2025-03-31
++```
++
++#### インタラクティブモード
++```bash
++node scripts/test-mcp-simple.js
++
++# インタラクティブモード内で利用可能なコマンド:
++# > help    - 詳細な使用例を表示
++# > exit    - 終了
++# > freee_current_user
++# > get_deals limit=5
++```
++
++### 改善点
++- ✅ 冗長な事前テスト削除（高速起動）
++- ✅ エラーハンドリング強化（readline競合状態解決）
++- ✅ レスポンス表示最適化（長文は要約）
++- ✅ コマンドライン引数対応
++- ✅ ヘルプ機能内蔵（--help、インタラクティブモード内help）
++- ✅ 適切な終了処理
++
++## test-mcp.js (従来版)
++
++完全な動作確認用で、事前テストも含まれます。
++
++### 動作フロー
++1. **MCP サーバー起動**: `pnpm tsx src/index.ts` でサーバーを起動
++2. **初期化**: MCP プロトコルで initialize  
++3. **ツール一覧取得**: 利用可能な全ツールを表示
++4. **事前テスト**: 基本的なツール（`freee_status`, `freee_auth_status` など）を自動実行
++5. **インタラクティブモード**: ユーザーが任意のツールを手動テスト
++
++### 使い方
++```bash
++node scripts/test-mcp.js
++```
++
++## パラメータ形式
++
++### key=value 形式
++```bash
++get_receipts start_date=2025-01-01 end_date=2025-12-31 limit=3
++get_deals limit=5
++```
++
++### JSON 形式（インタラクティブモードのみ）
++```bash
++get_receipts {"start_date":"2025-01-01","end_date":"2025-12-31","limit":3}
++```
++
++### 対応している型変換
++- **文字列**: そのまま文字列として扱う
++- **整数**: `123` → `123` (number)
++- **小数**: `12.34` → `12.34` (number)
++- **JSON**: 完全なJSONオブジェクトをパース
++
++## Claude Code での推奨使用手順
++
++```bash
++# 1. 認証状態確認
++node scripts/test-mcp-simple.js freee_auth_status
++
++# 2. データ取得テスト
++node scripts/test-mcp-simple.js get_deals limit=5
++
++# 3. バイナリダウンロードテスト
++node scripts/test-mcp-simple.js get_receipts_by_id_download id=123456789
++```
++
++## 主要な利用可能ツール
++
++### 認証・管理ツール（パラメータ不要）
++- `freee_current_user` - 現在のユーザー情報とAPI動作確認
++- `freee_auth_status` - 認証状態の詳細確認
++- `freee_list_companies` - 事業所一覧（実API呼び出し）
++- `freee_get_current_company` - 現在の事業所情報
++- `freee_status` - システム全体の状態確認
++- `freee_help` - 使い方ガイド
++
++### freee API ツール（パラメータが必要な場合あり）
++- `get_companies` - 事業所一覧取得
++- `get_users_me` - ユーザー情報取得
++- `get_deals` - 取引一覧取得
++- `get_receipts` - レシート一覧取得（start_date, end_date 必須）
++- `get_receipts_by_id_download` - レシートダウンロード（バイナリ）
++- `get_journals_reports_by_id_download` - 仕訳帳ダウンロード（バイナリ）
++
++## バイナリダウンロードのテスト手順
++
++### 1. レシートダウンロード
++```bash
++# レシート一覧を取得してIDを確認
++node scripts/test-mcp-simple.js get_receipts start_date=2025-01-01 end_date=2025-12-31
++
++# 取得したIDでバイナリダウンロード
++node scripts/test-mcp-simple.js get_receipts_by_id_download id=123456789
++```
++
++### 2. 仕訳帳ダウンロード
++```bash
++# 仕訳帳ダウンロードリクエスト
++node scripts/test-mcp-simple.js get_journals download_type=pdf start_date=2025-01-01 end_date=2025-03-31
++
++# 受け付けIDでダウンロード
++node scripts/test-mcp-simple.js get_journals_reports_by_id_download id=987654321
++```
++
++### 期待結果
++```
++Binary data downloaded successfully (XXX bytes).
++Base64: data:application/octet-stream;base64,...
++
++📊 総文字数: XXXXX 文字
++```
++
++## トラブルシューティング
++
++### 認証エラーの場合
++```bash
++node scripts/test-mcp-simple.js freee_authenticate  # 再認証
++node scripts/test-mcp-simple.js freee_auth_status   # 状態確認
++```
++
++### ヘルプが必要な場合
++```bash
++# コマンドライン
++node scripts/test-mcp-simple.js --help
++
++# インタラクティブモード内
++> help
++```
++
++### パラメータエラーの場合
++- ヘルプで正しいパラメータ形式を確認
++- または MCP Inspector (`pnpm inspector`) を使用してGUI でパラメータを指定
++
++## テスト方法の比較
++
++| 方法 | 用途 | 特徴 |
++|------|------|------|
++| `test-mcp-simple.js` (CLI) | 日常開発、CI/CD | 高速、ワンライナー実行、Claude Code最適 |
++| `test-mcp.js` (CLI) | 完全な動作確認 | 事前テスト付き、詳細ログ |
++| `pnpm inspector` (GUI) | 初回確認、複雑なパラメータ | ブラウザ、パラメータ入力支援 |
++
++## Issue #4 バイナリダウンロード修正の確認
++
++今回の修正により、以下が正常に動作するようになりました：
++
++### ✅ 修正内容
++1. **`makeApiRequest()`** - Content-Type に基づくバイナリレスポンス処理
++2. **OpenAPI ツール** - ArrayBuffer の Base64 変換
++3. **ダウンロード系ツール** - PDF/画像ファイルの正常な取得
++
++### ✅ 動作確認済み
++- **レシートダウンロード**: JPEG画像形式対応
++- **仕訳帳ダウンロード**: PDF形式対応 
++- **通常APIテスト**: 取引データ5件取得
++
++### 推奨テスト手順
++```bash
++# 1. バイナリダウンロード確認
++node scripts/test-mcp-simple.js get_receipts_by_id_download id=123456789
++
++# 2. 通常API確認  
++node scripts/test-mcp-simple.js get_deals limit=5
++
++# 3. 認証状態確認
++node scripts/test-mcp-simple.js freee_auth_status
++```
++
++全ての機能が正常に動作していることが確認済みです。
++
++## 注意事項
++
++- **実際のAPI呼び出し**: このスクリプトは実際の freee API を呼び出します
++- **認証必須**: `~/.config/freee-mcp/tokens.json` に有効な認証トークンが必要
++- **事業所データ**: 現在設定されている事業所のデータを使用
++- **レート制限**: freee API のレート制限に注意（特に `/receipts/{id}/download` は1秒に3回まで）
+\ No newline at end of file
+diff --git a/scripts/test-mcp-simple.js b/scripts/test-mcp-simple.js
+new file mode 100755
+index 0000000..f64da8a
+--- /dev/null
++++ b/scripts/test-mcp-simple.js
+@@ -0,0 +1,426 @@
++#!/usr/bin/env node
++
++/**
++ * freee MCP Server テストツール (Claude Code 向け最適化版)
++ * 使いやすさとパフォーマンスを重視したシンプルなテストスクリプト
++ */
++
++import { spawn } from 'child_process';
++import { createInterface } from 'readline';
++
++class FreeMcpTester {
++  constructor() {
++    this.mcpProcess = null;
++    this.requestId = 1;
++    this.isInitialized = false;
++    this.responses = [];
++    this.rl = null;
++    this.isShuttingDown = false;
++  }
++
++  getNextRequestId() {
++    return this.requestId++;
++  }
++
++  sendMcpMessage(message) {
++    if (!this.mcpProcess) {
++      console.error('❌ MCPプロセスが開始されていません');
++      return;
++    }
++    const jsonMessage = JSON.stringify(message);
++    this.mcpProcess.stdin.write(jsonMessage + '\n');
++  }
++
++  async startMcpServer() {
++    if (this.mcpProcess) {
++      console.log('✅ MCPサーバーは既に起動済みです');
++      return;
++    }
++
++    console.log('🚀 freee MCP Server を起動しています...');
++    
++    this.mcpProcess = spawn('pnpm', ['tsx', 'src/index.ts'], {
++      stdio: 'pipe',
++      cwd: process.cwd(),
++      env: { ...process.env, FREEE_CALLBACK_PORT: '8085' }
++    });
++
++    // レスポンス処理 (改良版)
++    let accumulatedData = '';
++    this.mcpProcess.stdout.on('data', (data) => {
++      accumulatedData += data.toString();
++      const lines = accumulatedData.split('\n');
++      accumulatedData = lines.pop() || '';
++      
++      lines.forEach((line) => {
++        if (line.trim()) {
++          try {
++            const response = JSON.parse(line);
++            this.responses.push(response);
++          } catch (error) {
++            // 大きなJSONの場合は再度蓄積
++            if (line.includes('"tools":[') && !line.includes(']}}')) {
++              accumulatedData = line + accumulatedData;
++            }
++          }
++        }
++      });
++    });
++
++    // エラーログ処理
++    this.mcpProcess.stderr.on('data', (data) => {
++      const log = data.toString().trim();
++      if (!log.includes('Port 8080 is already in use')) {
++        console.log(`📋 ${log}`);
++      }
++    });
++
++    // プロセス終了処理
++    this.mcpProcess.on('exit', (code) => {
++      if (!this.isShuttingDown) {
++        console.log(`\n🏁 MCPサーバーが終了しました (コード: ${code})`);
++      }
++    });
++
++    // 起動待機
++    await new Promise(resolve => setTimeout(resolve, 2000));
++  }
++
++  async initializeMcp() {
++    if (this.isInitialized) {
++      return;
++    }
++
++    console.log('🔧 MCP初期化中...');
++
++    // 初期化
++    this.sendMcpMessage({
++      jsonrpc: '2.0',
++      id: this.getNextRequestId(),
++      method: 'initialize',
++      params: {
++        protocolVersion: '2024-11-05',
++        capabilities: { tools: {} },
++        clientInfo: { name: 'freee-mcp-simple-test', version: '1.0.0' }
++      }
++    });
++
++    await new Promise(resolve => setTimeout(resolve, 500));
++
++    // ツール一覧取得
++    this.sendMcpMessage({
++      jsonrpc: '2.0',
++      id: this.getNextRequestId(),
++      method: 'tools/list',
++      params: {}
++    });
++
++    await new Promise(resolve => setTimeout(resolve, 1000));
++    this.isInitialized = true;
++    console.log('✅ MCP初期化完了\n');
++  }
++
++  parseToolInput(input) {
++    const trimmed = input.trim();
++    
++    // JSON形式の場合
++    const jsonMatch = trimmed.match(/^(\S+)\s+(\{.+\})$/);
++    if (jsonMatch) {
++      try {
++        const toolName = jsonMatch[1];
++        const args = JSON.parse(jsonMatch[2]);
++        return { toolName, arguments: args };
++      } catch (e) {
++        console.log('❌ JSON解析エラー:', e.message);
++        return null;
++      }
++    }
++    
++    // key=value形式の場合
++    const parts = trimmed.split(/\s+/);
++    const toolName = parts[0];
++    const args = {};
++    
++    for (let i = 1; i < parts.length; i++) {
++      const part = parts[i];
++      const eqIndex = part.indexOf('=');
++      if (eqIndex > 0) {
++        const key = part.substring(0, eqIndex);
++        let value = part.substring(eqIndex + 1);
++        
++        // 数値変換
++        if (/^\d+$/.test(value)) {
++          value = parseInt(value);
++        } else if (/^\d+\.\d+$/.test(value)) {
++          value = parseFloat(value);
++        }
++        
++        args[key] = value;
++      }
++    }
++    
++    return { toolName, arguments: args };
++  }
++
++  async executeTool(toolName, args = {}) {
++    await this.ensureReady();
++
++    console.log(`\n🛠️ 実行: ${toolName}`);
++    if (Object.keys(args).length > 0) {
++      console.log(`📋 パラメータ: ${JSON.stringify(args)}`);
++    }
++
++    const beforeCount = this.responses.length;
++    
++    this.sendMcpMessage({
++      jsonrpc: '2.0',
++      id: this.getNextRequestId(),
++      method: 'tools/call',
++      params: {
++        name: toolName,
++        arguments: args
++      }
++    });
++
++    // レスポンス待機
++    let attempts = 0;
++    while (attempts < 30) { // 最大15秒待機
++      await new Promise(resolve => setTimeout(resolve, 500));
++      
++      const newResponses = this.responses.slice(beforeCount);
++      const toolResponse = newResponses.find(r => r.result && r.result.content);
++      
++      if (toolResponse) {
++        console.log('📥 結果:');
++        if (toolResponse.result.content[0].text.length > 1000) {
++          // 長いレスポンスは要約表示
++          const text = toolResponse.result.content[0].text;
++          console.log(text.substring(0, 500) + '\n... (省略) ...\n' + text.substring(text.length - 200));
++          console.log(`\n📊 総文字数: ${text.length} 文字`);
++        } else {
++          console.log(toolResponse.result.content[0].text);
++        }
++        return toolResponse;
++      }
++      
++      attempts++;
++    }
++    
++    console.log('⚠️ タイムアウト: レスポンスが取得できませんでした');
++    return null;
++  }
++
++  async ensureReady() {
++    if (!this.mcpProcess) {
++      await this.startMcpServer();
++    }
++    if (!this.isInitialized) {
++      await this.initializeMcp();
++    }
++  }
++
++  async startInteractiveMode() {
++    await this.ensureReady();
++
++    console.log('=== インタラクティブモード ===');
++    console.log('💡 使用例:');
++    console.log('  freee_current_user');
++    console.log('  get_deals limit=5');
++    console.log('  get_receipts start_date=2025-01-01 end_date=2025-12-31 limit=3');
++    console.log('  get_receipts_by_id_download id=123456789');
++    console.log('');
++    console.log('📚 コマンド:');
++    console.log('  help    - 詳細な使用例を表示');
++    console.log('  exit    - 終了');
++    console.log('  Ctrl+C  - 強制終了');
++    console.log('');
++
++    this.rl = createInterface({
++      input: process.stdin,
++      output: process.stdout
++    });
++
++    const askForTool = () => {
++      if (this.isShuttingDown) return;
++      
++      this.rl.question('🔧 ツール名を入力 > ', async (input) => {
++        if (this.isShuttingDown) return;
++        
++        const trimmedInput = input.toLowerCase().trim();
++        
++        if (trimmedInput === 'exit') {
++          this.shutdown();
++          return;
++        }
++
++        if (trimmedInput === 'help') {
++          showHelp();
++          // 次の入力を待つ
++          setTimeout(() => {
++            if (!this.isShuttingDown) {
++              askForTool();
++            }
++          }, 100);
++          return;
++        }
++
++        if (input.trim()) {
++          const parsed = this.parseToolInput(input);
++          if (parsed) {
++            await this.executeTool(parsed.toolName, parsed.arguments);
++          }
++        }
++        
++        // 次の入力を待つ
++        setTimeout(() => {
++          if (!this.isShuttingDown) {
++            askForTool();
++          }
++        }, 100);
++      });
++    };
++
++    askForTool();
++  }
++
++  shutdown() {
++    if (this.isShuttingDown) return;
++    
++    this.isShuttingDown = true;
++    console.log('\n👋 テスト終了');
++    
++    if (this.rl) {
++      this.rl.close();
++    }
++    
++    if (this.mcpProcess) {
++      this.mcpProcess.kill();
++    }
++    
++    process.exit(0);
++  }
++
++  // 一回だけのツール実行 (コマンドライン引数対応)
++  async runSingleTool(toolName, args = {}) {
++    try {
++      await this.ensureReady();
++      const result = await this.executeTool(toolName, args);
++      this.shutdown();
++      return result;
++    } catch (error) {
++      console.error('❌ エラー:', error);
++      this.shutdown();
++    }
++  }
++}
++
++// ヘルプ表示
++function showHelp() {
++  console.log(`
++🔧 freee MCP テストツール - 使い方
++
++📋 基本的な使い方:
++
++  # インタラクティブモード
++  node scripts/test-mcp-simple.js
++
++  # コマンドライン実行（一回だけ）
++  node scripts/test-mcp-simple.js <ツール名> [パラメータ...]
++
++💡 使用例:
++
++  # 基本ツール
++  node scripts/test-mcp-simple.js freee_current_user
++  node scripts/test-mcp-simple.js freee_auth_status
++  node scripts/test-mcp-simple.js freee_list_companies
++
++  # データ取得
++  node scripts/test-mcp-simple.js get_deals limit=5
++  node scripts/test-mcp-simple.js get_receipts start_date=2025-01-01 end_date=2025-12-31 limit=3
++  node scripts/test-mcp-simple.js get_companies
++
++  # バイナリダウンロード
++  node scripts/test-mcp-simple.js get_receipts_by_id_download id=123456789
++  node scripts/test-mcp-simple.js get_journals_reports_by_id_download id=987654321
++
++  # 仕訳帳生成 → ダウンロード
++  node scripts/test-mcp-simple.js get_journals download_type=pdf start_date=2025-01-01 end_date=2025-03-31
++
++📚 パラメータ形式:
++  - key=value: get_deals limit=5
++  - 複数パラメータ: get_receipts start_date=2025-01-01 end_date=2025-12-31 limit=3
++
++🆘 オプション:
++  --help, -h    このヘルプを表示
++  --version     バージョン情報
++
++🚀 Claude Code での推奨使用法:
++  1. まず認証状態確認: node scripts/test-mcp-simple.js freee_auth_status
++  2. データ取得テスト: node scripts/test-mcp-simple.js get_deals limit=5
++  3. バイナリダウンロードテスト: node scripts/test-mcp-simple.js get_receipts_by_id_download id=123456789
++`);
++}
++
++// メイン実行部分
++async function main() {
++  const tester = new FreeMcpTester();
++
++  // Ctrl+C ハンドリング
++  process.on('SIGINT', () => {
++    tester.shutdown();
++  });
++
++  // エラーハンドリング
++  process.on('uncaughtException', (error) => {
++    console.error('❌ 未処理の例外:', error);
++    tester.shutdown();
++  });
++
++  // コマンドライン引数処理
++  const args = process.argv.slice(2);
++  
++  // ヘルプ表示
++  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
++    if (args.includes('--help') || args.includes('-h')) {
++      showHelp();
++      return;
++    }
++  }
++
++  // バージョン情報
++  if (args.includes('--version')) {
++    console.log('freee MCP テストツール v1.0.0');
++    return;
++  }
++
++  // コマンドライン引数で一回だけの実行
++  if (args.length > 0) {
++    const toolName = args[0];
++    const toolArgs = {};
++    
++    // key=value 形式の引数を解析
++    for (let i = 1; i < args.length; i++) {
++      const arg = args[i];
++      const eqIndex = arg.indexOf('=');
++      if (eqIndex > 0) {
++        const key = arg.substring(0, eqIndex);
++        let value = arg.substring(eqIndex + 1);
++        
++        if (/^\d+$/.test(value)) {
++          value = parseInt(value);
++        } else if (/^\d+\.\d+$/.test(value)) {
++          value = parseFloat(value);
++        }
++        
++        toolArgs[key] = value;
++      }
++    }
++    
++    await tester.runSingleTool(toolName, toolArgs);
++  } else {
++    // インタラクティブモード
++    await tester.startInteractiveMode();
++  }
++}
++
++main().catch(console.error);
+\ No newline at end of file
+diff --git a/scripts/test-mcp.js b/scripts/test-mcp.js
+index 7377f26..7f949e5 100644
+--- a/scripts/test-mcp.js
++++ b/scripts/test-mcp.js
+@@ -30,9 +30,34 @@ async function testMcpTools() {
+     cwd: process.cwd()
+   });
+ 
+-  // 標準出力の監視
++  // 標準出力の監視 - 大きなJSONレスポンス対応
++  let accumulatedData = '';
++  const responses = [];
++  
+   mcpProcess.stdout.on('data', (data) => {
+-    console.log(`📥 受信: ${data.toString().trim()}`);
++    accumulatedData += data.toString();
++    const lines = accumulatedData.split('\n');
++    
++    // 最後の不完全な行は次回まで保持
++    accumulatedData = lines.pop() || '';
++    
++    lines.forEach((line) => {
++      if (line.trim()) {
++        try {
++          const response = JSON.parse(line);
++          console.log('📥 Response received:', JSON.stringify(response, null, 2));
++          responses.push(response);
++        } catch (error) {
++          // JSONが大きすぎて分割されている場合の処理
++          if (line.includes('"tools":[') && !line.includes(']}}')) {
++            console.log('📥 Large tools response detected, accumulating...');
++            accumulatedData = line + accumulatedData;
++          } else {
++            console.log('⚠️ Non-JSON data:', line.substring(0, 200) + (line.length > 200 ? '...' : ''));
++          }
++        }
++      }
++    });
+   });
+ 
+   // 標準エラー出力の監視（ログ用）
+@@ -138,7 +163,16 @@ async function testMcpTools() {
+ 
+   // インタラクティブモード
+   console.log('\n=== インタラクティブモード ===');
+-  console.log('ツール名を入力してテストしてください（例: freee_current_user）');
++  console.log('ツール名を入力してテストしてください');
++  console.log('');
++  console.log('📋 使用例:');
++  console.log('  freee_current_user');
++  console.log('  get_receipts start_date=2024-01-01 end_date=2024-12-31 limit=3');
++  console.log('  get_api_1_receipts_123_download');
++  console.log('');
++  console.log('💡 JSON形式も可能:');
++  console.log('  get_receipts {"start_date":"2024-01-01","end_date":"2024-12-31","limit":3}');
++  console.log('');
+   console.log('終了するには "exit" と入力してください\n');
+ 
+   const rl = createInterface({
+@@ -146,26 +180,77 @@ async function testMcpTools() {
+     output: process.stdout
+   });
+ 
++  const parseToolInput = (input) => {
++    const trimmed = input.trim();
++    
++    // JSON形式の場合
++    const jsonMatch = trimmed.match(/^(\S+)\s+(\{.+\})$/);
++    if (jsonMatch) {
++      try {
++        const toolName = jsonMatch[1];
++        const args = JSON.parse(jsonMatch[2]);
++        return { toolName, arguments: args };
++      } catch (e) {
++        console.log('❌ JSON解析エラー:', e.message);
++        return null;
++      }
++    }
++    
++    // key=value形式の場合
++    const parts = trimmed.split(/\s+/);
++    const toolName = parts[0];
++    const args = {};
++    
++    for (let i = 1; i < parts.length; i++) {
++      const part = parts[i];
++      const eqIndex = part.indexOf('=');
++      if (eqIndex > 0) {
++        const key = part.substring(0, eqIndex);
++        let value = part.substring(eqIndex + 1);
++        
++        // 数値かどうか判定
++        if (/^\d+$/.test(value)) {
++          value = parseInt(value);
++        } else if (/^\d+\.\d+$/.test(value)) {
++          value = parseFloat(value);
++        }
++        
++        args[key] = value;
++      }
++    }
++    
++    return { toolName, arguments: args };
++  };
++
+   const askForTool = () => {
+-    rl.question('ツール名を入力 > ', (toolName) => {
+-      if (toolName.toLowerCase() === 'exit') {
++    rl.question('ツール名を入力 > ', (input) => {
++      if (input.toLowerCase().trim() === 'exit') {
+         console.log('\n👋 テスト終了');
+         mcpProcess.kill();
+         rl.close();
+         process.exit(0);
+       }
+ 
+-      if (toolName.trim()) {
+-        console.log(`\n=== ${toolName} ツールテスト ===`);
+-        sendMcpMessage(mcpProcess, {
+-          jsonrpc: '2.0',
+-          id: getNextRequestId(),
+-          method: 'tools/call',
+-          params: {
+-            name: toolName,
+-            arguments: {}
++      if (input.trim()) {
++        const parsed = parseToolInput(input);
++        if (parsed) {
++          const { toolName, arguments: args } = parsed;
++          console.log(`\n=== ${toolName} ツールテスト ===`);
++          
++          if (Object.keys(args).length > 0) {
++            console.log(`📋 パラメータ: ${JSON.stringify(args)}`);
+           }
+-        });
++          
++          sendMcpMessage(mcpProcess, {
++            jsonrpc: '2.0',
++            id: getNextRequestId(),
++            method: 'tools/call',
++            params: {
++              name: toolName,
++              arguments: args
++            }
++          });
++        }
+         
+         setTimeout(() => {
+           askForTool();
+diff --git a/scripts/test-tools.js b/scripts/test-tools.js
+index 41d7ded..c7c3c60 100644
+--- a/scripts/test-tools.js
++++ b/scripts/test-tools.js
+@@ -50,9 +50,21 @@ async function testFreeeTools() {
+     'delete_deals_by_id'
+   ];
+   
++  console.log('\n📥 バイナリダウンロードツール:');
++  const downloadTools = [
++    'download_receipt',
++    'download_journal',
++    'get_receipts',
++    'get_journals_reports'
++  ];
++  
+   sampleApiTools.forEach(tool => {
+     console.log(`  • ${tool}`);
+   });
++  
++  downloadTools.forEach(tool => {
++    console.log(`  • ${tool}`);
++  });
+ 
+   console.log('\n=== 個別ツールテスト ===\n');
+ 
+@@ -73,8 +85,14 @@ async function testFreeeTools() {
+   console.log('2. 本格的なMCPクライアントテスト:');
+   console.log('   node scripts/test-mcp.js');
+   console.log('   → MCP プロトコル経由でツールを実行');
++  console.log('   → ~/.config/freee-mcp/ の認証トークンを使用');
++  console.log('');
++  console.log('3. バイナリダウンロードテスト例:');
++  console.log('   # インタラクティブモードで以下を実行:');
++  console.log('   get_receipts  # まずレシート一覧を取得');
++  console.log('   download_receipt  # レシートIDを指定してダウンロード');
+   console.log('');
+-  console.log('3. Claude Code での使用:');
++  console.log('4. Claude Code での使用:');
+   console.log('   Claude Code の設定にMCPサーバーを追加して使用');
+   console.log('');
+   console.log('=== 設定例 (Claude Code) ===');
+diff --git a/src/api/client.test.ts b/src/api/client.test.ts
+index 7cb0548..e6cbd44 100644
+--- a/src/api/client.test.ts
++++ b/src/api/client.test.ts
+@@ -42,6 +42,9 @@ describe('client', () => {
+       const mockResponse = { data: 'test-data' };
+       mockFetch.mockResolvedValue({
+         ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'application/json' : null
++        },
+         json: () => Promise.resolve(mockResponse)
+       });
+ 
+@@ -67,6 +70,9 @@ describe('client', () => {
+       
+       mockFetch.mockResolvedValue({
+         ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'application/json' : null
++        },
+         json: () => Promise.resolve({})
+       });
+ 
+@@ -84,6 +90,9 @@ describe('client', () => {
+       
+       mockFetch.mockResolvedValue({
+         ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'application/json' : null
++        },
+         json: () => Promise.resolve({})
+       });
+ 
+@@ -101,6 +110,9 @@ describe('client', () => {
+       
+       mockFetch.mockResolvedValue({
+         ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'application/json' : null
++        },
+         json: () => Promise.resolve({})
+       });
+ 
+@@ -188,5 +200,95 @@ describe('client', () => {
+         'API request failed: 500\n\n詳細: {}'
+       );
+     });
++
++    it('should handle binary responses for download endpoints', async () => {
++      const mockGetValidAccessToken = await import('../auth/tokens.js');
++      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
++      
++      const mockArrayBuffer = new ArrayBuffer(8);
++      mockFetch.mockResolvedValue({
++        ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'application/pdf' : null
++        },
++        arrayBuffer: () => Promise.resolve(mockArrayBuffer)
++      });
++
++      const result = await makeApiRequest('GET', '/api/1/receipts/123/download');
++
++      expect(result).toBe(mockArrayBuffer);
++    });
++
++    it('should handle binary responses for image content types', async () => {
++      const mockGetValidAccessToken = await import('../auth/tokens.js');
++      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
++      
++      const mockArrayBuffer = new ArrayBuffer(8);
++      mockFetch.mockResolvedValue({
++        ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'image/png' : null
++        },
++        arrayBuffer: () => Promise.resolve(mockArrayBuffer)
++      });
++
++      const result = await makeApiRequest('GET', '/api/1/receipts/123/download');
++
++      expect(result).toBe(mockArrayBuffer);
++    });
++
++    it('should handle binary responses for paths containing download', async () => {
++      const mockGetValidAccessToken = await import('../auth/tokens.js');
++      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
++      
++      const mockArrayBuffer = new ArrayBuffer(8);
++      mockFetch.mockResolvedValue({
++        ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'text/plain' : null
++        },
++        arrayBuffer: () => Promise.resolve(mockArrayBuffer)
++      });
++
++      const result = await makeApiRequest('GET', '/api/1/journals/reports/123/download');
++
++      expect(result).toBe(mockArrayBuffer);
++    });
++
++    it('should handle JSON responses for non-binary content types', async () => {
++      const mockGetValidAccessToken = await import('../auth/tokens.js');
++      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
++      
++      const mockResponse = { data: 'test-data' };
++      mockFetch.mockResolvedValue({
++        ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'application/json' : null
++        },
++        json: () => Promise.resolve(mockResponse)
++      });
++
++      const result = await makeApiRequest('GET', '/api/1/users/me');
++
++      expect(result).toEqual(mockResponse);
++    });
++
++    it('should handle text responses for unknown content types', async () => {
++      const mockGetValidAccessToken = await import('../auth/tokens.js');
++      vi.mocked(mockGetValidAccessToken.getValidAccessToken).mockResolvedValue('test-access-token');
++      
++      const mockText = 'plain text response';
++      mockFetch.mockResolvedValue({
++        ok: true,
++        headers: {
++          get: (name: string) => name === 'content-type' ? 'text/plain' : null
++        },
++        text: () => Promise.resolve(mockText)
++      });
++
++      const result = await makeApiRequest('GET', '/api/1/unknown/endpoint');
++
++      expect(result).toBe(mockText);
++    });
+   });
+ });
+\ No newline at end of file
+diff --git a/src/api/client.ts b/src/api/client.ts
+index 97ba5e6..423e802 100644
+--- a/src/api/client.ts
++++ b/src/api/client.ts
+@@ -90,5 +90,18 @@ export async function makeApiRequest(
+     throw new Error(errorMessage);
+   }
+ 
+-  return response.json();
++  const contentType = response.headers.get('content-type');
++  
++  if (contentType?.includes('application/json')) {
++    return response.json();
++  }
++  
++  if (contentType?.includes('application/pdf') || 
++      contentType?.includes('image/') || 
++      contentType?.includes('application/octet-stream') ||
++      path.includes('/download')) {
++    return response.arrayBuffer();
++  }
++  
++  return response.text();
+ }
+\ No newline at end of file
+diff --git a/src/openapi/converter.test.ts b/src/openapi/converter.test.ts
+index b9da1f4..95af6e4 100644
+--- a/src/openapi/converter.test.ts
++++ b/src/openapi/converter.test.ts
+@@ -215,5 +215,21 @@ describe('converter', () => {
+         undefined
+       );
+     });
++
++    it('should handle binary responses (ArrayBuffer) correctly', async () => {
++      const mockMakeApiRequest = await import('../api/client.js');
++      const mockArrayBuffer = new ArrayBuffer(1024);
++      vi.mocked(mockMakeApiRequest.makeApiRequest).mockResolvedValue(mockArrayBuffer);
++
++      generateToolsFromOpenApi(mockServer);
++
++      const getUserMeHandler = mockTool.mock.calls.find(call => call[0] === 'get_api_1_users_me')?.[3];
++      expect(getUserMeHandler).toBeDefined();
++
++      const result = await getUserMeHandler({ company_id: 12345 });
++
++      expect(result.content[0].text).toContain('Binary data downloaded successfully (1024 bytes)');
++      expect(result.content[0].text).toContain('Base64: data:application/octet-stream;base64,');
++    });
+   });
+ });
+\ No newline at end of file
+diff --git a/src/openapi/converter.ts b/src/openapi/converter.ts
+index c834c7d..135002f 100644
+--- a/src/openapi/converter.ts
++++ b/src/openapi/converter.ts
+@@ -5,11 +5,16 @@ import { OpenAPIOperation, OpenAPIPathItem, OpenAPIParameter } from '../api/type
+ import { convertParameterToZodSchema, convertPathToToolName } from './schema.js';
+ import { makeApiRequest } from '../api/client.js';
+ 
++function sanitizeParameterName(name: string): string {
++  // Replace spaces and invalid characters with underscores
++  // Keep only letters, numbers, underscores, dots, and hyphens
++  return name.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64);
++}
++
+ export function generateToolsFromOpenApi(server: McpServer): void {
+   const paths = freeeApiSchema.paths;
+ 
+   const orderedPathKeys = Object.keys(paths).sort() as (keyof typeof paths)[];
+-
+   orderedPathKeys.forEach((pathKey) => {
+     const pathItem: OpenAPIPathItem = paths[pathKey];
+     Object.entries(pathItem).forEach(([method, operation]: [string, OpenAPIOperation]) => {
+@@ -17,10 +22,13 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+       const description = operation.summary || operation.description || '';
+ 
+       const parameterSchema: Record<string, z.ZodType> = {};
++      const parameterNameMap: Record<string, string> = {}; // sanitized -> original
+ 
+       const pathParams = operation.parameters?.filter((p) => p.in === 'path') || [];
+       pathParams.forEach((param) => {
+-        parameterSchema[param.name] = convertParameterToZodSchema(param);
++        const sanitizedName = sanitizeParameterName(param.name);
++        parameterSchema[sanitizedName] = convertParameterToZodSchema(param);
++        parameterNameMap[sanitizedName] = param.name;
+       });
+ 
+       const queryParams = operation.parameters?.filter((p) => p.in === 'query') || [];
+@@ -29,7 +37,9 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+         if (param.name === 'company_id') {
+           schema = schema.optional();
+         }
+-        parameterSchema[param.name] = schema;
++        const sanitizedName = sanitizeParameterName(param.name);
++        parameterSchema[sanitizedName] = schema;
++        parameterNameMap[sanitizedName] = param.name;
+       });
+ 
+       let bodySchema = z.any();
+@@ -44,13 +54,17 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+         try {
+           let actualPath = pathKey as string;
+           pathParams.forEach((param: OpenAPIParameter) => {
+-            actualPath = actualPath.replace(`{${param.name}}`, String(params[param.name]));
++            const sanitizedName = sanitizeParameterName(param.name);
++            if (params[sanitizedName] !== undefined) {
++              actualPath = actualPath.replace(`{${param.name}}`, String(params[sanitizedName]));
++            }
+           });
+ 
+           const queryParameters: Record<string, unknown> = {};
+           queryParams.forEach((param: OpenAPIParameter) => {
+-            if (params[param.name] !== undefined) {
+-              queryParameters[param.name] = params[param.name];
++            const sanitizedName = sanitizeParameterName(param.name);
++            if (params[sanitizedName] !== undefined) {
++              queryParameters[param.name] = params[sanitizedName];
+             }
+           });
+ 
+@@ -63,6 +77,19 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+             bodyParameters,
+           );
+ 
++          // Handle binary responses (ArrayBuffer)
++          if (result instanceof ArrayBuffer) {
++            const base64Data = Buffer.from(result).toString('base64');
++            return {
++              content: [
++                {
++                  type: 'text',
++                  text: `Binary data downloaded successfully (${result.byteLength} bytes).\nBase64: data:application/octet-stream;base64,${base64Data}`,
++                },
++              ],
++            };
++          }
++
+           return {
+             content: [
+               {
+-- 
+2.39.5
+

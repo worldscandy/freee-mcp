@@ -1,0 +1,77 @@
+From 79071a341a14bb0f9c142510d3f08687a275ece7 Mon Sep 17 00:00:00 2001
+From: Yuji Kamada <yuji.kamada@eijuworks.com>
+Date: Sat, 12 Jul 2025 15:33:56 +0900
+Subject: [PATCH 1/4] Fix MCP schema validation error by sanitizing property
+ names
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Add sanitizePropertyName() function to ensure property names match MCP pattern '^[a-zA-Z0-9_.-]{1,64}$'
+- Apply sanitization to both path and query parameters in tool generation
+- Replace invalid characters with underscores and limit to 64 characters
+- Resolves API Error 400 when using .mcp.json configuration with Claude Code
+
+This issue occurs due to MCP framework's stricter property name validation
+in recent versions. The fix ensures compatibility with both current and
+future MCP versions while maintaining functionality.
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ src/openapi/converter.ts | 6 +++---
+ src/openapi/schema.ts    | 7 +++++++
+ 2 files changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/src/openapi/converter.ts b/src/openapi/converter.ts
+index c834c7d..7e5f6e9 100644
+--- a/src/openapi/converter.ts
++++ b/src/openapi/converter.ts
+@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+ import { z } from 'zod';
+ import freeeApiSchema from '../data/freee-api-schema.json';
+ import { OpenAPIOperation, OpenAPIPathItem, OpenAPIParameter } from '../api/types.js';
+-import { convertParameterToZodSchema, convertPathToToolName } from './schema.js';
++import { convertParameterToZodSchema, convertPathToToolName, sanitizePropertyName } from './schema.js';
+ import { makeApiRequest } from '../api/client.js';
+ 
+ export function generateToolsFromOpenApi(server: McpServer): void {
+@@ -20,7 +20,7 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+ 
+       const pathParams = operation.parameters?.filter((p) => p.in === 'path') || [];
+       pathParams.forEach((param) => {
+-        parameterSchema[param.name] = convertParameterToZodSchema(param);
++        parameterSchema[sanitizePropertyName(param.name)] = convertParameterToZodSchema(param);
+       });
+ 
+       const queryParams = operation.parameters?.filter((p) => p.in === 'query') || [];
+@@ -29,7 +29,7 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+         if (param.name === 'company_id') {
+           schema = schema.optional();
+         }
+-        parameterSchema[param.name] = schema;
++        parameterSchema[sanitizePropertyName(param.name)] = schema;
+       });
+ 
+       let bodySchema = z.any();
+diff --git a/src/openapi/schema.ts b/src/openapi/schema.ts
+index 654d0ef..cf1d37d 100644
+--- a/src/openapi/schema.ts
++++ b/src/openapi/schema.ts
+@@ -46,4 +46,11 @@ export function convertPathToToolName(path: string): string {
+   }
+ 
+   return toolName;
++}
++
++export function sanitizePropertyName(name: string): string {
++  // MCP property names must match pattern '^[a-zA-Z0-9_.-]{1,64}$'
++  return name
++    .replace(/[^a-zA-Z0-9_.-]/g, '_') // Replace invalid characters with underscore
++    .substring(0, 64); // Limit to 64 characters
+ }
+\ No newline at end of file
+-- 
+2.39.5
+

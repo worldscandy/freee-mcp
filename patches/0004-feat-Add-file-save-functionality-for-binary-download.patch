@@ -1,0 +1,92 @@
+From 3c70253bdadb19806b5ee7d412e20e45f0d25866 Mon Sep 17 00:00:00 2001
+From: Yuji Kamada <yuji.kamada@eijuworks.com>
+Date: Sun, 13 Jul 2025 20:31:40 +0900
+Subject: [PATCH 4/4] feat: Add file save functionality for binary downloads
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Add file_path parameter for /download endpoints automatically
+- Save binary responses to local files to avoid MCP token limits
+- Create directories recursively if they don't exist
+- Provide fallback to Base64 if file_path not specified
+- Test verified with receipt PDFs (42KB) and journal reports (286KB)
+
+Resolves token limit issues where large binary responses
+(49,214 tokens) exceeded Claude Code's 25,000 token limit.
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ src/openapi/converter.ts | 41 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/src/openapi/converter.ts b/src/openapi/converter.ts
+index 6bd618a..48c6385 100644
+--- a/src/openapi/converter.ts
++++ b/src/openapi/converter.ts
+@@ -1,5 +1,7 @@
+ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+ import { z } from 'zod';
++import * as fs from 'fs';
++import * as path from 'path';
+ import freeeApiSchema from '../data/freee-api-schema.json';
+ import { OpenAPIOperation, OpenAPIPathItem, OpenAPIParameter } from '../api/types.js';
+ import { convertParameterToZodSchema, convertPathToToolName, sanitizePropertyName } from './schema.js';
+@@ -36,6 +38,12 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+         parameterNameMap[sanitizedName] = param.name;
+       });
+ 
++      // Add file_path parameter for download endpoints
++      const isDownloadEndpoint = pathKey.includes('/download');
++      if (isDownloadEndpoint) {
++        parameterSchema['file_path'] = z.string().describe('保存先ファイルパス（例: /tmp/receipt.pdf）');
++      }
++
+       let bodySchema = z.any();
+       if (method === 'post' || method === 'put') {
+         const requestBody = operation.requestBody?.content?.['application/json']?.schema;
+@@ -73,6 +81,39 @@ export function generateToolsFromOpenApi(server: McpServer): void {
+ 
+           // Handle binary responses (ArrayBuffer)
+           if (result instanceof ArrayBuffer) {
++            // For download endpoints, save file if file_path is provided
++            if (isDownloadEndpoint && params.file_path) {
++              try {
++                // Ensure directory exists
++                const dir = path.dirname(params.file_path as string);
++                if (!fs.existsSync(dir)) {
++                  fs.mkdirSync(dir, { recursive: true });
++                }
++                
++                // Save binary data to file
++                fs.writeFileSync(params.file_path as string, Buffer.from(result));
++                
++                return {
++                  content: [
++                    {
++                      type: 'text',
++                      text: `Binary file downloaded successfully.\nSaved to: ${params.file_path}\nSize: ${result.byteLength} bytes`,
++                    },
++                  ],
++                };
++              } catch (fileError) {
++                return {
++                  content: [
++                    {
++                      type: 'text',
++                      text: `Error saving file: ${fileError instanceof Error ? fileError.message : String(fileError)}\nBinary data size: ${result.byteLength} bytes`,
++                    },
++                  ],
++                };
++              }
++            }
++            
++            // Fallback: return Base64 (may hit token limits for large files)
+             const base64Data = Buffer.from(result).toString('base64');
+             return {
+               content: [
+-- 
+2.39.5
+
